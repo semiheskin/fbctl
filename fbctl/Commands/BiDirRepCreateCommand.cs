@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.CommandLine;
+using System.ComponentModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -16,21 +17,27 @@ namespace fbctl.Commands
     {
         public class Settings : CommandSettings
         {
+            [Description("Name of the first FlashBlade. Must match the name in the appsettings.json")]
             [CommandArgument(0, "<array1>")]
             public string? Array1 { get; init; }
 
+            [Description("Name of the second FlashBlade. Must match the name in the appsettings.json")]
             [CommandArgument(1, "<array2>")]
             public string? Array2 { get; init; }
 
+            [Description("Name of the account to be used")]
             [CommandOption("--account")]
             public string? Account { get; init; }
 
+            [Description("Flag for new account creation")]
             [CommandOption("--create-account")]
             public bool? CreateAccount { get; init; }
 
+            [Description("Name of the new user to be created")]
             [CommandOption("--new-user")]
             public string? NewUser { get; init; }
 
+            [Description("Command seperated list of policies for the new user")]
             [CommandOption("--new-user-policies")]
             public string? NewUserPolicies { get; init; }
 
@@ -47,18 +54,28 @@ namespace fbctl.Commands
                 }
             }
 
+            [Description("Name of the replication user to be used")]
             [CommandOption("--replication-user")]
             public string? ReplicationUser { get; init; }
 
+            [Description("Flag for new replication user creation")]
             [CommandOption("--create-replication-user")]
             public bool? CreateReplicationUser { get; init; }
 
+            [Description("Name of the bucket to be created")]
             [CommandOption("--bucket")]
             public string? Bucket { get; init; }
 
+            [Description("Flag for setting public access for the bucket")]
             [CommandOption("--public-bucket")]
             public bool? PublicBucket { get; init; }
+
+            [Description("Retention duration in days for object versioning")]
+            [CommandOption("--retention")]
+            [DefaultValue(7)]
+            public int Retention { get; init; }
         }
+
         public override int Execute(CommandContext context, Settings settings)
         {
             if (context.Data is not IConfigurationRoot appsettings)
@@ -122,7 +139,7 @@ namespace fbctl.Commands
             //if it is a new account, don't need to validate user and replication user
             if (!settings.CreateAccount.HasValue || !settings.CreateAccount.Value)
             {
-                //Validate --create-user, --create-replicaiton-user
+                //Validate --new-user, --create-replicaiton-user
                 foreach (var fb in flashBlades)
                 {
                     //Validate --create-user
@@ -131,7 +148,7 @@ namespace fbctl.Commands
                     if (isUserExists && !string.IsNullOrWhiteSpace(settings.NewUser))
                     {
                         AnsiConsole.Markup($"\nUser \'{settings.Account + "/" + settings.NewUser}\' already exists on FlashBlade \'{fb.Item1.Name}\'" +
-                            $"\nDrop --create-user option to use existing user");
+                            $"\nDrop --new-user option or provide a user that doesn't exists");
 
                         return 1;
                     }
@@ -157,8 +174,6 @@ namespace fbctl.Commands
 
                         return 1;
                     }
-
-
                 }
             }
 
@@ -352,8 +367,7 @@ namespace fbctl.Commands
                     return 1;
                 }
 
-                //TODO: Parameterize retension period
-                if (fb.Item2.CreateLifecycleRuleForBucket(settings.Bucket!, 7).Result)
+                if (fb.Item2.CreateLifecycleRuleForBucket(settings.Bucket!, settings.Retention).Result)
                 {
                     AnsiConsole.Markup($"\nLifecycle rule for Bucket \'{settings.Bucket}\' on FlashBlade \'{fb.Item1.Name}\' created [green]successfully[/]");
                 }
@@ -378,7 +392,6 @@ namespace fbctl.Commands
                             $"\nPlease enable public access manually from the FlashBlade");
 
                         //contiunue process, public access is not mandatory for replication
-
                     }
                 }
             }

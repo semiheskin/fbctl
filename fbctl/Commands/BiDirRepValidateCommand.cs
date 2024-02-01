@@ -22,8 +22,6 @@ namespace fbctl.Commands
             public string? Array2 { get; init; }
         }
 
-        
-
         public override int Execute(CommandContext context, Settings settings)
         {
             if (context.Data is not IConfigurationRoot appsettings)
