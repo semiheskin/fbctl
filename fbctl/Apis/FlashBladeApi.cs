@@ -1,22 +1,11 @@
 ﻿using Microsoft.IdentityModel.Tokens;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using System;
-using System.Collections.Generic;
-using System.Collections.Specialized;
 using System.IdentityModel.Tokens.Jwt;
-using System.Linq;
-using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Net.Sockets;
 using System.Security.Claims;
 using System.Security.Cryptography;
-using System.Security.Principal;
-using System.Text;
-using System.Threading.Tasks;
 using System.Web;
-using System.Xml.Linq;
 
 namespace fbctl.Apis
 {
@@ -486,6 +475,5 @@ namespace fbctl.Apis
             var response = await httpClient.PostAsync(CreateApiUri(BucketReplicaLinksMethod, queryParameters), null);
             return response.IsSuccessStatusCode;
         }
-
     }
 }

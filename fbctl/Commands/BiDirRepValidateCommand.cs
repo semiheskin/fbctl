@@ -2,12 +2,6 @@
 using Microsoft.Extensions.Configuration;
 using Spectre.Console;
 using Spectre.Console.Cli;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Sockets;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace fbctl.Commands
 {
@@ -21,7 +15,7 @@ namespace fbctl.Commands
             [CommandArgument(1, "<array2>")]
             public string? Array2 { get; init; }
         }
-
+        
         public override int Execute(CommandContext context, Settings settings)
         {
             if (context.Data is not IConfigurationRoot appsettings)

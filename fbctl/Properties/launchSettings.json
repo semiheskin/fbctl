@@ -2,7 +2,7 @@
   "profiles": {
     "fbctl": {
       "commandName": "Project",
-      "commandLineArgs": "bidirrep create fbstaines03 fbstaines04 --account aab --create-account --new-user user1 --new-user-policies pure:policy/bucket-configure,pure:policy/bucket-create --replication-user repuser1 --create-replication-user --bucket testbucket1",
+      "commandLineArgs": "bidirrep create fbstaines03 fbstaines04 --account aaa --create-account --new-user user1 --new-user-policies pure:policy/bucket-configure,pure:policy/bucket-create --replication-user repuser1 --create-replication-user --bucket testbucket1 --retention 1",
       "environmentVariables": {
         "DOTNET_ENVIRONMENT": "Development"
       }
