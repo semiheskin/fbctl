@@ -31,6 +31,22 @@ namespace fbctl.Commands
             [CommandOption("--new-user")]
             public string? NewUser { get; init; }
 
+            [CommandOption("--new-user-policies")]
+            public string? NewUserPolicies { get; init; }
+
+            public string[]? NewUserPoliciesList
+            {
+                get
+                {
+                    if (NewUserPolicies is not null)
+                    {
+                        return NewUserPolicies.Split(',', StringSplitOptions.RemoveEmptyEntries & StringSplitOptions.TrimEntries);
+                    }
+
+                    return null;
+                }
+            }
+
             [CommandOption("--replication-user")]
             public string? ReplicationUser { get; init; }
 
@@ -201,7 +217,10 @@ namespace fbctl.Commands
                 //Create users
                 foreach (var fb in flashBlades)
                 {
-                    if (fb.Item2.CreateUser(settings.Account!, settings.NewUser!).Result)
+                    var isNewUserPoliciesSet = !string.IsNullOrWhiteSpace(settings.NewUserPolicies);
+
+                    //if custom user policies is not set, user will be created with full-access permission
+                    if (fb.Item2.CreateUser(settings.Account!, settings.NewUser!, !isNewUserPoliciesSet).Result)
                     {
                         AnsiConsole.Markup($"\nUser \'{settings.NewUser}\' created on FlashBlade \'{fb.Item1.Name}\' [green]successfully[/]");
                     }
@@ -210,6 +229,25 @@ namespace fbctl.Commands
                         AnsiConsole.Markup($"\nUser creation for the user \'{settings.NewUser}\' [red]failed[/] on FlashBlade \'{fb.Item1.Name}\'");
                         return 1;
                     }
+
+                    //if custom user policies are set, set these policies for the user
+                    //Policies must be added one by one, this is enforced by the FlashBlade Api
+                    if (isNewUserPoliciesSet)
+                    {
+                        foreach (var policyToAdd in settings.NewUserPoliciesList!)
+                        {
+                            if (fb.Item2.SetAccessPoliciesForUser(settings.Account!, settings.NewUser!, policyToAdd).Result)
+                            {
+                                AnsiConsole.Markup($"\nAccess policy \'{policyToAdd}\' is set for the user \'{settings.NewUser}\' on FlashBlade \'{fb.Item1.Name}\' [green]successfully[/]");
+                            }
+                            else
+                            {
+                                AnsiConsole.Markup($"\nSetting up access policies \'{settings.NewUserPolicies}\' for the user \'{settings.NewUser}\' [red]failed[/] on FlashBlade \'{fb.Item1.Name}\'");
+                                return 1;
+                            }
+                        }
+                    }
+
                 }
 
                 //Create access key on FlashBlade 1
@@ -249,7 +287,8 @@ namespace fbctl.Commands
                 //Create replication users
                 foreach (var fb in flashBlades)
                 {
-                    if (fb.Item2.CreateUser(settings.Account!, settings.ReplicationUser!).Result)
+                    //Replication user needs full access
+                    if (fb.Item2.CreateUser(settings.Account!, settings.ReplicationUser!, true).Result)
                     {
                         AnsiConsole.Markup($"\nUser \'{settings.ReplicationUser}\' created on FlashBlade \'{fb.Item1.Name}\' [green]successfully[/]");
                     }
@@ -421,8 +460,17 @@ namespace fbctl.Commands
             if (settings.ReplicationUser is null)
                 return ValidationResult.Error("--replication-user option must be specified");
 
+            if (settings.CreateAccount is not null && settings.CreateReplicationUser is null)
+                return ValidationResult.Error("when --create-account is set new replication user must be created with --create-replication-user option");
+
             if (settings.Bucket is null)
                 return ValidationResult.Error("--bucket option must be specified");
+
+            if (settings.NewUser is null && settings.NewUserPolicies is not null)
+                return ValidationResult.Error("--new-user-polices option must be used when --new-user option has been specified");
+
+            if (settings.NewUserPolicies is not null && settings.NewUserPoliciesList!.Length != settings.NewUserPoliciesList!.Intersect(Constants.UserPolicies).Count())
+                return ValidationResult.Error("--new-user-policies option must be a comma(,) seperated list of valid policies");
 
             return base.Validate(context, settings);
         }

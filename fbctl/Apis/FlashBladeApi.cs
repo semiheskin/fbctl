@@ -31,6 +31,7 @@ namespace fbctl.Apis
         internal const string BucketAccessPoliciesMethod = "buckets/bucket-access-policies";
         internal const string LifecycleRulesMethod = "lifecycle-rules";
         internal const string ObjectStoreUsersMethod = "object-store-users";
+        internal const string ObjectStoreAccessPolicies = "object-store-users/object-store-access-policies";
         internal const string ObjectStoreAccessKeysMethod = "object-store-access-keys";
         internal const string ObjectStoreRemoteCredentialsMethod = "object-store-remote-credentials";
         internal const string BucketReplicaLinksMethod = "bucket-replica-links";
@@ -349,14 +350,14 @@ namespace fbctl.Apis
             return response.IsSuccessStatusCode;
         }
 
-        internal async Task<bool> CreateUser(string account, string user)
+        internal async Task<bool> CreateUser(string account, string user, bool fullAccess)
         {
             var httpClient = CreateAuthHttpClient();
 
             var queryParameters = new Dictionary<string, string>()
             {
                 { "names", account + "/" + user },
-                { "full_access", "true" }
+                { "full_access", fullAccess.ToString().ToLower() }
             };
 
             var response = await httpClient.PostAsync(CreateApiUri(ObjectStoreUsersMethod, queryParameters), null);
@@ -382,12 +383,8 @@ namespace fbctl.Apis
             {
                 var responseJson = JObject.Parse(await response.Content.ReadAsStringAsync());
 
-#pragma warning disable CS8604 // Possible null reference argument.
-#pragma warning disable CS8602 // Dereference of a possibly null reference.
-                var accessKeyId = responseJson["items"].First()["name"].ToString();
-                var secretAccessKey = responseJson["items"].First()["secret_access_key"].ToString();
-#pragma warning restore CS8602 // Dereference of a possibly null reference.
-#pragma warning restore CS8604 // Possible null reference argument.
+                var accessKeyId = responseJson["items"]!.First()["name"]!.ToString();
+                var secretAccessKey = responseJson["items"]!.First()["secret_access_key"]!.ToString();
 
                 return new Tuple<string, string>(accessKeyId, secretAccessKey);
             }
@@ -414,6 +411,21 @@ namespace fbctl.Apis
                 CreateApiUri(ObjectStoreAccessKeysMethod, queryParameters),
                 new StringContent(JsonConvert.SerializeObject(content),
                 new MediaTypeHeaderValue(HttpJsonMediaType)));
+
+            return response.IsSuccessStatusCode;
+        }
+
+        internal async Task<bool> SetAccessPoliciesForUser(string account, string user, string accessPolicies)
+        {
+            var httpClient = CreateAuthHttpClient();
+
+            var queryParameters = new Dictionary<string, string>()
+            {
+                { "member_names", account + "/" + user },
+                { "policy_names", accessPolicies  }
+            };
+
+            var response = await httpClient.PostAsync(CreateApiUri(ObjectStoreAccessPolicies, queryParameters), null);
 
             return response.IsSuccessStatusCode;
         }

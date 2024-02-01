@@ -17,6 +17,20 @@ namespace fbctl.Helpers
         public const string AppSettingsFlashBladeUsernameKey = "username";
         public const string AppSettingsFlashBladePrivateKeyPathKey = "privatekeypath";
 
-
+        public static readonly string[] UserPolicies =
+        [
+            "pure:policy/bucket-configure",
+            "pure:policy/bucket-create",
+            "pure:policy/bucket-delete",
+            "pure:policy/bucket-info",
+            "pure:policy/bucket-list",
+            "pure:policy/object-delete",
+            "pure:policy/object-list",
+            "pure:policy/object-lock",
+            "pure:policy/object-lock-bypass-governance",
+            "pure:policy/object-read",
+            "pure:policy/object-write",
+            "pure:policy/version-delete"
+        ];
     }
 }
