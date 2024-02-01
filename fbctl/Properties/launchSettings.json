@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "fbctl": {
+      "commandName": "Project",
+      "commandLineArgs": "bidirrep create fbstaines03 fbstaines04 --account aaa --new-user user1 --replication-user repuser1 --bucket testbucket1 --public-bucket",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

@@ -1,0 +1,430 @@
+﻿using System;
+using System.Collections.Generic;
+using System.CommandLine;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using fbctl.Apis;
+using fbctl.Helpers;
+using Microsoft.Extensions.Configuration;
+using Spectre.Console;
+using Spectre.Console.Cli;
+
+namespace fbctl.Commands
+{
+    public class BiDirRepCreateCommand : Command<BiDirRepCreateCommand.Settings>
+    {
+        public class Settings : CommandSettings
+        {
+            [CommandArgument(0, "<array1>")]
+            public string? Array1 { get; init; }
+
+            [CommandArgument(1, "<array2>")]
+            public string? Array2 { get; init; }
+
+            [CommandOption("--account")]
+            public string? Account { get; init; }
+
+            [CommandOption("--create-account")]
+            public bool? CreateAccount { get; init; }
+
+            [CommandOption("--new-user")]
+            public string? NewUser { get; init; }
+
+            [CommandOption("--replication-user")]
+            public string? ReplicationUser { get; init; }
+
+            [CommandOption("--create-replication-user")]
+            public bool? CreateReplicationUser { get; init; }
+
+            [CommandOption("--bucket")]
+            public string? Bucket { get; init; }
+
+            [CommandOption("--public-bucket")]
+            public bool? PublicBucket { get; init; }
+        }
+        public override int Execute(CommandContext context, Settings settings)
+        {
+            if (context.Data is not IConfigurationRoot appsettings)
+                return 1;
+
+            var fb1 = FlashBladeSettingsHelper.ConvertToSettings(appsettings.GetSection(Constants.AppSettingsFlashBladesSectionName), settings.Array1!);
+            var fb2 = FlashBladeSettingsHelper.ConvertToSettings(appsettings.GetSection(Constants.AppSettingsFlashBladesSectionName), settings.Array2!);
+
+
+            AnsiConsole.Write("\nRunning pre-checks");
+            if (!FlashBladeSettingsHelper.CheckMagementApiNetworkAccess(fb1, fb2)) return 1;
+            if (!FlashBladeSettingsHelper.CheckManagementApiVersion(fb1, fb2)) return 1;
+            if (!FlashBladeSettingsHelper.CheckLogin(fb1, fb2)) return 1;
+            AnsiConsole.WriteLine("\nPre-checks finished");
+
+            var flashBlades = new Tuple<FlashBladeSettings, FlashBladeApi>[2];
+
+            flashBlades[0] = new Tuple<FlashBladeSettings, FlashBladeApi>(fb1, new FlashBladeApi(fb1.ManagementIpFqdn!));
+            flashBlades[1] = new Tuple<FlashBladeSettings, FlashBladeApi>(fb2, new FlashBladeApi(fb2.ManagementIpFqdn!));
+
+            //Login to both FlashBlades
+            foreach (var fb in flashBlades)
+            {
+                if (fb.Item2.Login(fb.Item1.ClientId!, fb.Item1.KeyId!, fb.Item1.Issuer!, fb.Item1.Username!, fb.Item1.PrivateKeyPath!).Result)
+                {
+                    AnsiConsole.Markup($"\nLogged into FlashBalde \'{fb.Item1.Name}\' [green]successfully[/]");
+                }
+                else
+                {
+                    AnsiConsole.Markup($"\nLogin [red]failed[/] for FlashBlade \'{fb.Item1.Name}\'");
+                    return 1;
+                }
+            }
+
+            //Validate --create-account flag
+            foreach (var fb in flashBlades)
+            {
+                var isAccountExists = fb.Item2.IsAccountExists(settings.Account!).Result;
+
+                if (isAccountExists &&
+                    settings.CreateAccount.HasValue &&
+                    settings.CreateAccount.Value)
+                {
+                    AnsiConsole.Markup($"\nAccount \'{settings.Account}\' already exists on FlashBlade \'{fb.Item1.Name}\'" +
+                        $"\nDrop --create-account option to use existing account");
+
+                    return 1;
+                }
+
+                if (!isAccountExists &&
+                    (!settings.CreateAccount.HasValue || !settings.CreateAccount.Value))
+                {
+                    AnsiConsole.Markup($"\nAccount \'{settings.Account}\' doesn't exists on FlashBlade \'{fb.Item1.Name}\'" +
+                        $"\nSet --create-account option to create new account");
+
+                    return 1;
+                }
+            }
+
+            var isReplicationUserExists = false;
+            //if it is a new account, don't need to validate user and replication user
+            if (!settings.CreateAccount.HasValue || !settings.CreateAccount.Value)
+            {
+                //Validate --create-user, --create-replicaiton-user
+                foreach (var fb in flashBlades)
+                {
+                    //Validate --create-user
+                    var isUserExists = fb.Item2.IsUserExists(settings.Account!, settings.NewUser!).Result;
+
+                    if (isUserExists && !string.IsNullOrWhiteSpace(settings.NewUser))
+                    {
+                        AnsiConsole.Markup($"\nUser \'{settings.Account + "/" + settings.NewUser}\' already exists on FlashBlade \'{fb.Item1.Name}\'" +
+                            $"\nDrop --create-user option to use existing user");
+
+                        return 1;
+                    }
+
+                    //Validate --create-replicaiton-user
+                    isReplicationUserExists = fb.Item2.IsUserExists(settings.Account!, settings.ReplicationUser!).Result;
+
+                    if (isReplicationUserExists &&
+                        settings.CreateReplicationUser.HasValue &&
+                        settings.CreateReplicationUser.Value)
+                    {
+                        AnsiConsole.Markup($"\nReplication user \'{settings.Account + "/" + settings.ReplicationUser}\' already exists on FlashBlade \' {fb.Item1.Name} \'" +
+                            $"\nDrop --create-replicaiton-user option to use existing replication user");
+
+                        return 1;
+                    }
+
+                    if (!isReplicationUserExists &&
+                        (!settings.CreateReplicationUser.HasValue || !settings.CreateReplicationUser.Value))
+                    {
+                        AnsiConsole.Markup($"\nUser \'{settings.Account + "/" + settings.ReplicationUser}\' doesn't exists on FlashBlade \'{fb.Item1.Name}\'" +
+                            $"\nSet --create-replicaiton-user option to create new user");
+
+                        return 1;
+                    }
+
+
+                }
+            }
+
+            //Validate --bucket. Bucket names must be unique in array scope
+            foreach (var fb in flashBlades)
+            {
+                if (fb.Item2.IsBucketExists(settings.Bucket!).Result)
+                {
+                    AnsiConsole.Markup($"\nBucket \'{settings.Bucket}\' already exists on FlashBlade \'{fb.Item1.Name}\'" +
+                        $"\nExisting buckets are not supported");
+
+                    return 1;
+                }
+            }
+
+            //Validate remote credentials if replication user is already exists
+            if (isReplicationUserExists)
+            {
+                if (!flashBlades[0].Item2.IsRemoteCredentialExists(flashBlades[1].Item1.Name!, settings.ReplicationUser!).Result)
+                {
+                    AnsiConsole.Markup($"\nRemote credential doesn't exits for the replication user \'{settings.ReplicationUser}\' supplied on FlashBlade \'{flashBlades[1].Item1.Name}\'" +
+                        $"\nCreate remote credential manually or use \'--create-replication-user\' option to create a new one");
+
+                    return 1;
+                }
+
+                if (!flashBlades[1].Item2.IsRemoteCredentialExists(flashBlades[0].Item1.Name!, settings.ReplicationUser!).Result)
+                {
+                    AnsiConsole.Markup($"\nRemote credential doesn't exits for the replication user \'{settings.ReplicationUser}\' supplied on FlashBlade \'{flashBlades[0].Item1.Name}\'" +
+                        $"\nCreate remote credential manually or use --create-replication-user option to create a new one");
+
+                    return 1;
+                }
+            }
+
+            //Create account if needed on both FlashBlades
+            if (settings.CreateAccount.HasValue && settings.CreateAccount.Value)
+            {
+                foreach (var fb in flashBlades)
+                {
+                    if (fb.Item2.CreateAccount(settings.Account!).Result)
+                    {
+                        AnsiConsole.Markup($"\nAccount \'{settings.Account}\' created on FlashBlade \'{fb.Item1.Name}\' [green]successfully[/]");
+                    }
+                    else
+                    {
+                        AnsiConsole.Markup($"\nAccount creation for the account \'{settings.Account}\' [red]failed[/] for FlashBlade \'{fb.Item1.Name}\'");
+                        return 1;
+                    }
+                }
+            }
+
+            //Create user if needed on both FlashBlades
+            if (!string.IsNullOrWhiteSpace(settings.NewUser))
+            {
+                //Create users
+                foreach (var fb in flashBlades)
+                {
+                    if (fb.Item2.CreateUser(settings.Account!, settings.NewUser!).Result)
+                    {
+                        AnsiConsole.Markup($"\nUser \'{settings.NewUser}\' created on FlashBlade \'{fb.Item1.Name}\' [green]successfully[/]");
+                    }
+                    else
+                    {
+                        AnsiConsole.Markup($"\nUser creation for the user \'{settings.NewUser}\' [red]failed[/] on FlashBlade \'{fb.Item1.Name}\'");
+                        return 1;
+                    }
+                }
+
+                //Create access key on FlashBlade 1
+                var accessKeyResult = flashBlades[0].Item2.CreateAccessKeyForUser(settings.Account!, settings.NewUser!).Result;
+                if (accessKeyResult is null)
+                {
+                    AnsiConsole.Markup($"\nAccess key creation for the user \'{settings.NewUser}\' [red]failed[/] on FlashBlade \'{flashBlades[0].Item1.Name}\'");
+                    return 1;
+                }
+                else
+                {
+                    AnsiConsole.Markup($"\nAccess Key \'{accessKeyResult.Item1}\' created on FlashBlade \'{flashBlades[0].Item1.Name}\' [green]successfully[/]");
+                }
+
+                //Import access key to FlashBlade 2
+                if (flashBlades[1].Item2.ImportAccessKeyForUser(settings.Account!, settings.NewUser!, accessKeyResult.Item1, accessKeyResult.Item2).Result)
+                {
+                    AnsiConsole.Markup($"\nAccess Key \'{accessKeyResult.Item1}\' imported to FlashBlade \'{flashBlades[1].Item1.Name}\' [green]successfully[/]");
+                }
+                else
+                {
+                    AnsiConsole.Markup($"\nAccess key creation for the user \'{settings.NewUser}\' [red]failed[/] on FlashBlade {flashBlades[1].Item1.Name}");
+                    return 1;
+                }
+
+                AnsiConsole.Markup($"\n\nUser: {settings.NewUser}" +
+                    $"\nAccess Key ID: {accessKeyResult.Item1}" +
+                    $"\nSecret Access Key: {accessKeyResult.Item2}" +
+                    $"\nSave these parameters for further use\n");
+
+            }
+
+            Tuple<string, string>? replicationUserAccessKey = null;
+            //Create replication user if needed on both FlashBlades
+            if (settings.CreateReplicationUser.HasValue && settings.CreateReplicationUser.Value)
+            {
+                //Create replication users
+                foreach (var fb in flashBlades)
+                {
+                    if (fb.Item2.CreateUser(settings.Account!, settings.ReplicationUser!).Result)
+                    {
+                        AnsiConsole.Markup($"\nUser \'{settings.ReplicationUser}\' created on FlashBlade \'{fb.Item1.Name}\' [green]successfully[/]");
+                    }
+                    else
+                    {
+                        AnsiConsole.Markup($"\nUser creation for the replication user \'{settings.ReplicationUser}\' [red]failed[/] on FlashBlade \'{fb.Item1.Name}\'");
+                        return 1;
+                    }
+                }
+
+                //Create access key on FlashBlade 1
+                replicationUserAccessKey = flashBlades[0].Item2.CreateAccessKeyForUser(settings.Account!, settings.ReplicationUser!).Result;
+                if (replicationUserAccessKey is null)
+                {
+                    AnsiConsole.Markup($"\nAccess key creation for the replication user \'{settings.ReplicationUser}\' [red]failed[/] on FlashBlade \'{flashBlades[0].Item1.Name}\'");
+                    return 1;
+                }
+                else
+                {
+                    AnsiConsole.Markup($"\nAccess Key \'{replicationUserAccessKey.Item1}\' created on FlashBlade \'{flashBlades[0].Item1.Name}\' [green]successfully[/]");
+                }
+
+                //Import access key to FlashBlade 2
+                if (flashBlades[1].Item2.ImportAccessKeyForUser(settings.Account!, settings.ReplicationUser!, replicationUserAccessKey.Item1, replicationUserAccessKey.Item2).Result)
+                {
+                    AnsiConsole.Markup($"\nAccess Key \'{replicationUserAccessKey.Item1}\' imported to FlashBlade \'{flashBlades[1].Item1.Name}\' [green]successfully[/]");
+                }
+                else
+                {
+                    AnsiConsole.Markup($"\nAccess key creation for the replication user \'{settings.ReplicationUser}\' [red]failed[/] on FlashBlade \'{flashBlades[1].Item1.Name}\'");
+                    return 1;
+                }
+
+                AnsiConsole.Markup($"\n\nReplication User: {settings.ReplicationUser}" +
+                    $"\nAccess Key ID: {replicationUserAccessKey.Item1}" +
+                    $"\nSecret Access Key: {replicationUserAccessKey.Item2}" +
+                    $"\nSave these parameters for further use\n");
+
+            }
+
+            //Create bucket and configure bucket
+            foreach (var fb in flashBlades)
+            {
+                if (fb.Item2.CreateBucket(settings.Account!, settings.Bucket!).Result)
+                {
+                    AnsiConsole.Markup($"\nBucket \'{settings.Bucket}\' created on FlashBlade \'{fb.Item1.Name}\' [green]successfully[/]");
+                }
+                else
+                {
+                    AnsiConsole.Markup($"\nBucket creation for the bucket \'{settings.Bucket}\' [red]failed[/] on FlashBlade \'{fb.Item1.Name}\'");
+                    return 1;
+                }
+
+                if (fb.Item2.EnableVersioningForBucket(settings.Bucket!).Result)
+                {
+                    AnsiConsole.Markup($"\nVersioning enabled for bucket \'{settings.Bucket}\' on FlashBlade \'{fb.Item1.Name}\' [green]successfully[/]");
+                }
+                else
+                {
+                    AnsiConsole.Markup($"\nEnable versioning for the bucket \'{settings.Bucket}\' [red]failed[/] on FlashBlade \'{fb.Item1.Name}\'");
+                    return 1;
+                }
+
+                //TODO: Parameterize retension period
+                if (fb.Item2.CreateLifecycleRuleForBucket(settings.Bucket!, 7).Result)
+                {
+                    AnsiConsole.Markup($"\nLifecycle rule for Bucket \'{settings.Bucket}\' on FlashBlade \'{fb.Item1.Name}\' created [green]successfully[/]");
+                }
+                else
+                {
+                    AnsiConsole.Markup($"\nCreating lifecycle rule for the bucket \'{settings.Bucket}\' [red]failed[/] on FlashBlade \'{fb.Item1.Name}\'");
+                    return 1;
+                }
+
+                //make buckets public
+                if (settings.PublicBucket.HasValue && settings.PublicBucket.Value)
+                {
+                    if (fb.Item2.EnablePublicAccessForAccount(settings.Account!).Result &&
+                        fb.Item2.EnablePublicAccessForBucket(settings.Bucket!).Result &&
+                        fb.Item2.CreatePublicBucketAccessPolicyForBucket(settings.Bucket!).Result)
+                    {
+                        AnsiConsole.Markup($"\nPublic access enabled for bucket \'{settings.Bucket}\' on FlashBlade \'{fb.Item1.Name}\' [green]successfully[/]");
+                    }
+                    else
+                    {
+                        AnsiConsole.Markup($"\nEnabling public access for the bucket \'{settings.Bucket}\' [red]failed[/] on FlashBlade \'{fb.Item1.Name}\'" +
+                            $"\nPlease enable public access manually from the FlashBlade");
+
+                        //contiunue process, public access is not mandatory for replication
+
+                    }
+                }
+            }
+
+            //create remote credentails for the replication user
+            if (!isReplicationUserExists && replicationUserAccessKey is not null)
+            {
+                if (string.IsNullOrWhiteSpace(
+                    flashBlades[0].Item2.CreateRemoteCredential(
+                        flashBlades[1].Item1.Name!,
+                        settings.ReplicationUser!,
+                        replicationUserAccessKey.Item1,
+                        replicationUserAccessKey.Item2)
+                    .Result))
+                {
+                    AnsiConsole.Markup($"\nCreating remote credential for the user \'{settings.ReplicationUser}\' [red]failed[/] on FlashBlade \'{flashBlades[0].Item1.Name}\'");
+                    return 1;
+                }
+                else
+                {
+                    AnsiConsole.Markup($"\nRemote credential for the user \'{settings.ReplicationUser}\' on FlashBlade \'{flashBlades[0].Item1.Name}\' created [green]successfully[/]");
+                }
+
+                if (string.IsNullOrWhiteSpace(
+                    flashBlades[1].Item2.CreateRemoteCredential(
+                        flashBlades[0].Item1.Name!,
+                        settings.ReplicationUser!,
+                        replicationUserAccessKey.Item1,
+                        replicationUserAccessKey.Item2)
+                    .Result))
+                {
+                    AnsiConsole.Markup($"\nCreating remote credential for the user \'{settings.ReplicationUser}\' [red]failed[/] on FlashBlade \'{flashBlades[1].Item1.Name}\'");
+                    return 1;
+                }
+                else
+                {
+                    AnsiConsole.Markup($"\nRemote credential for the user \'{settings.ReplicationUser}\' on FlashBlade \'{flashBlades[1].Item1.Name}\' created [green]successfully[/]");
+                }
+            }
+
+            //Create bucket replica links
+            if (flashBlades[0].Item2.CreateBucketReplicaLink(settings.Bucket!, flashBlades[1].Item1.Name + "/" + settings.ReplicationUser).Result)
+            {
+                AnsiConsole.Markup($"\nBucket replica link from \'{flashBlades[0].Item1.Name}\' to \'{flashBlades[1].Item1.Name}\' for bucket \'{settings.Bucket}\' created [green]successfully[/]");
+            }
+            else
+            {
+                AnsiConsole.Markup($"\nBucket replica link creation from \'{flashBlades[0].Item1.Name}\' to \'{flashBlades[1].Item1.Name}\' for bucket \'{settings.Bucket}\' [red]failed[/]");
+                return 1;
+            }
+
+            if (flashBlades[1].Item2.CreateBucketReplicaLink(settings.Bucket!, flashBlades[0].Item1.Name + "/" + settings.ReplicationUser).Result)
+            {
+                AnsiConsole.Markup($"\nBucket replica link from \'{flashBlades[1].Item1.Name}\' to \'{flashBlades[0].Item1.Name}\' for bucket \'{settings.Bucket}\' created [green]successfully[/]");
+            }
+            else
+            {
+                AnsiConsole.Markup($"\nBucket replica link creation from \'{flashBlades[1].Item1.Name}\' to \'{flashBlades[0].Item1.Name}\' for bucket \'{settings.Bucket}\' [red]failed[/]");
+                return 1;
+            }
+
+            AnsiConsole.WriteLine();
+
+            return 0;
+        }
+
+        public override ValidationResult Validate(CommandContext context, Settings settings)
+        {
+
+            if (context.Data is not IConfigurationRoot appsettings)
+                return ValidationResult.Error("AppSettings file could not be found");
+
+            if (!FlashBladeSettingsHelper.ValidateSettings(appsettings, out ValidationResult result, settings.Array1!, settings.Array2!))
+                return result;
+
+            if (settings.Account is null)
+                return ValidationResult.Error("--account option must be specified");
+
+            if (settings.ReplicationUser is null)
+                return ValidationResult.Error("--replication-user option must be specified");
+
+            if (settings.Bucket is null)
+                return ValidationResult.Error("--bucket option must be specified");
+
+            return base.Validate(context, settings);
+        }
+    }
+}
