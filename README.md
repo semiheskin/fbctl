@@ -56,5 +56,5 @@ OPTIONS:
 ```
 ## Example
 ```
-./fbctl bidirrep create flashblade01 flashblade01 --account testaccount --create-account --new-user testuser1 --new-user-policies pure:policy/bucket-create,pure:policy/bucket-delete --replication-user repluser1 --create-replication-user --bucket bucket1 --public-bucket --retention 5
+./fbctl bidirrep create flashblade01 flashblade02 --account testaccount --create-account --new-user testuser1 --new-user-policies pure:policy/bucket-create,pure:policy/bucket-delete --replication-user repluser1 --create-replication-user --bucket bucket1 --public-bucket --retention 5
 ```
